@@ -92,8 +92,12 @@ export class WorkspaceManager {
 
   eligible(cwd) {
     const current = canonicalPath(cwd);
-    return samePath(current, this.root) || samePath(current, this.home)
-      || samePath(current, path.parse(current).root);
+    if (samePath(current, this.root) || samePath(current, this.home)
+      || samePath(current, path.parse(current).root)) return true;
+    // Elevated Windows terminals often start here instead of the user home.
+    const systemRoot = process.platform === "win32" && (process.env.SystemRoot || process.env.WINDIR);
+    return Boolean(systemRoot && [systemRoot, path.join(systemRoot, "System32"), path.join(systemRoot, "SysWOW64")]
+      .some(directory => samePath(current, directory)));
   }
 
   keyFor(sessionId, sessionFile) {

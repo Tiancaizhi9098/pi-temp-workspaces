@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { WorkspaceManager, assertWorkspaceWrite } from "./manager.mjs";
+import { WorkspaceManager, assertWorkspaceWrite, samePath } from "./manager.mjs";
 import { janitorStatus, requestJanitorStop } from "./janitor.mjs";
 
 export function startJanitor(manager) {
@@ -20,14 +20,41 @@ export function startJanitor(manager) {
 }
 
 export function registerTempWorkspaces(pi, sdk, options = {}) {
-  const manager = new WorkspaceManager({ agentDir: sdk.getAgentDir(), ...options });
+  const hostAgentDir = sdk.getAgentDir();
+  const manager = new WorkspaceManager({ agentDir: hostAgentDir, ...options });
+  // Keep SDK configuration anchored to its original location after chdir().
+  if (process.env.PI_CODING_AGENT_DIR && !path.isAbsolute(hostAgentDir)) {
+    process.env.PI_CODING_AGENT_DIR = manager.agentDir;
+  }
   let current = null;
   let release = null;
   let observeTimer = null;
   let startupError = null;
   let toolsInstalled = false;
+  let processDirectory = null;
+
+  const restoreProcessDirectory = () => {
+    const previous = processDirectory;
+    processDirectory = null;
+    if (!previous) return;
+    let actual;
+    try { actual = process.cwd(); } catch { /* The OS may have removed the temporary folder. */ }
+    if (actual && !samePath(actual, previous.workspace)) return;
+    process.chdir(fs.existsSync(previous.cwd) ? previous.cwd : manager.home);
+  };
 
   const notifyError = (ctx, error) => ctx.ui.notify(`临时工作目录：${error.message}`, "error");
+  const updateWorkspaceTitle = ctx => {
+    const record = current;
+    if (!record) return;
+    setImmediate(() => {
+      if (current !== record) return;
+      try {
+        const name = ctx.sessionManager.getSessionName?.();
+        ctx.ui.setTitle?.(`π${name ? ` - ${name}` : ""} - ${path.basename(manager.root)}`);
+      } catch { /* Non-interactive hosts may not expose a terminal title. */ }
+    });
+  };
   const shellEnvironment = (record, env) => {
     const temp = path.join(record.workspace, ".tmp");
     const cache = path.join(record.workspace, ".cache");
@@ -79,18 +106,31 @@ export function registerTempWorkspaces(pi, sdk, options = {}) {
   pi.on("session_start", (_event, ctx) => {
     clearInterval(observeTimer);
     observeTimer = null;
+    try { restoreProcessDirectory(); } catch (error) { notifyError(ctx, error); }
     try { release?.(); } catch (error) { notifyError(ctx, error); }
     release = null;
     current = null;
     startupError = null;
     ctx.ui.setStatus("temp-workspace", undefined);
-    if (!manager.eligible(ctx.cwd)) {
+    const eligible = manager.eligible(ctx.cwd);
+    // Prepare the parent directory on every load, including project sessions.
+    // Activation is a separate decision and never redirects an ordinary project.
+    try {
+      manager.initialize();
+      if (options.background !== false) startJanitor(manager);
+    } catch (error) {
+      startupError = error;
+      notifyError(ctx, error);
+      if (toolsInstalled && !eligible) installTools(ctx, null);
+      toolsInstalled = false;
+      return;
+    }
+    if (!eligible) {
       if (toolsInstalled) installTools(ctx, null);
       toolsInstalled = false;
       return;
     }
     try {
-      manager.initialize();
       const report = manager.sweep();
       if (report.errors.length) ctx.ui.notify(`有 ${report.errors.length} 个临时目录未能清理，已保留。`, "warning");
       current = manager.bind({
@@ -98,18 +138,28 @@ export function registerTempWorkspaces(pi, sdk, options = {}) {
         sessionFile: ctx.sessionManager.getSessionFile(),
       });
       release = manager.acquire(current);
+      processDirectory = { cwd: process.cwd(), workspace: current.workspace };
+      process.chdir(current.workspace);
       observeTimer = setInterval(() => {
         try { if (current) manager.observe(current.key); } catch { /* Keep active work intact. */ }
       }, 3000);
       observeTimer.unref?.();
       installTools(ctx, current);
       toolsInstalled = true;
-      if (options.background !== false) startJanitor(manager);
+      updateWorkspaceTitle(ctx);
     } catch (error) {
+      clearInterval(observeTimer);
+      observeTimer = null;
+      try { restoreProcessDirectory(); } catch { /* Preserve the original startup error. */ }
+      try { release?.(); } catch { /* Preserve the original startup error. */ }
+      release = null;
+      current = null;
       startupError = error;
       notifyError(ctx, error);
     }
   });
+
+  pi.on("session_info_changed", (_event, ctx) => updateWorkspaceTitle(ctx));
 
   pi.on("before_agent_start", (event, ctx) => {
     if (startupError && manager.eligible(ctx.cwd)) throw startupError;
@@ -153,7 +203,8 @@ export function registerTempWorkspaces(pi, sdk, options = {}) {
   pi.on("session_shutdown", () => {
     clearInterval(observeTimer);
     observeTimer = null;
-    try { release?.(); } finally { release = null; current = null; }
+    try { restoreProcessDirectory(); }
+    finally { try { release?.(); } finally { release = null; current = null; } }
   });
 
   pi.registerCommand("temp-work", {
@@ -185,8 +236,8 @@ export function registerTempWorkspaces(pi, sdk, options = {}) {
       const status = janitorStatus(manager.state);
       const background = status.running === true ? `运行中（PID ${status.pid}）` : status.running === false ? "未运行" : "状态异常，请检查清理日志";
       const message = current
-        ? `当前临时对话目录：\n${current.workspace}\n\n/new 新建独立目录；/resume 恢复原目录。删除会话后约 10–15 秒自动清理，正在使用的目录会等到退出或切换后再清理。`
-        : `当前为普通项目对话。从用户主目录、盘符根目录或 ${manager.root} 启动 Pi 时，会自动创建并使用临时工作目录。`;
+        ? `当前临时对话目录：\n${current.workspace}\nPi 进程当前目录：\n${process.cwd()}\n\n/new 新建独立目录；/resume 恢复原目录。删除会话后约 10–15 秒自动清理，正在使用的目录会等到退出或切换后再清理。`
+        : `当前为普通项目对话，工作目录保持为 ${ctx.cwd}。\n${startupError ? `临时目录准备失败：${startupError.message}` : `临时父目录已准备：${manager.root}`}\n从用户主目录、盘符根目录、Windows 系统目录或该父目录启动 Pi 时，会启用临时会话。`;
       ctx.ui.notify(`${message}\n\n后台清理：${background}\n状态与日志：${manager.state}`, "info");
     },
   });

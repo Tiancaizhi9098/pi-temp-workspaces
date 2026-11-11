@@ -21,6 +21,8 @@ function environment(t, { project = false } = {}) {
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
+  const titles = [];
+  const notifications = [];
   let active = ["read", "write", "edit", "powershell"];
   const pi = {
     on: (name, fn) => handlers.set(name, fn),
@@ -37,7 +39,7 @@ function environment(t, { project = false } = {}) {
       getSessionId: () => identity.sessionId,
       getSessionFile: () => identity.sessionFile,
     },
-    ui: { notify() {}, setStatus() {} },
+    ui: { notify: (message, type) => notifications.push({ message, type }), setStatus() {}, setTitle: title => titles.push(title) },
   });
   const session = () => ({ sessionId: crypto.randomUUID(), sessionFile: path.join(base, "sessions", `${crypto.randomUUID()}.jsonl`) });
   t.after(async () => {
@@ -45,7 +47,7 @@ function environment(t, { project = false } = {}) {
     assert.ok(inside(testRoot, base) && base !== testRoot);
     fs.rmSync(base, { recursive: true, force: true });
   });
-  return { base, root, home, agentDir, handlers, tools, commands, extension, context, session, active: () => active };
+  return { base, root, home, agentDir, handlers, tools, commands, titles, notifications, extension, context, session, active: () => active };
 }
 
 test("real Pi file tools use the per-conversation cwd and reject external writes", async (t) => {
@@ -107,13 +109,31 @@ test("the model prompt receives the effective folder and output rules", (t) => {
   assert.match(event.systemPromptOptions.sections.temporary_workspace, /Playwriter/);
 });
 
-test("ordinary project sessions receive no tool overrides or scratch folders", (t) => {
+test("ordinary projects prepare Pi-Work without activating a workspace or changing cwd", (t) => {
   const f = environment(t, { project: true });
+  const before = process.cwd();
   const ctx = f.context(f.session());
   f.handlers.get("session_start")({ reason: "startup" }, ctx);
   assert.equal(f.extension.current, null);
   assert.equal(f.tools.size, 0);
-  assert.equal(fs.existsSync(f.root), false);
+  assert.equal(fs.existsSync(f.root), true);
+  assert.equal(fs.readdirSync(f.extension.manager.records).length, 0);
+  assert.equal(process.cwd(), before);
+});
+
+test("a preparation failure is reported without breaking an ordinary project", async t => {
+  const f = environment(t, { project: true });
+  const before = process.cwd();
+  fs.writeFileSync(f.root, "an existing file blocks directory creation");
+  const ctx = f.context(f.session());
+  f.handlers.get("session_start")({ reason: "startup" }, ctx);
+  assert.equal(f.extension.current, null);
+  assert.equal(process.cwd(), before);
+  assert.equal(f.tools.size, 0);
+  assert.equal(f.notifications.at(-1).type, "error");
+  assert.doesNotThrow(() => f.handlers.get("before_agent_start")({ systemPromptOptions: { cwd: ctx.cwd, sections: {} } }, ctx));
+  await f.commands.get("temp-work").handler("status", ctx);
+  assert.match(f.notifications.at(-1).message, /准备失败/);
 });
 
 for (const location of ["home", "drive-root"]) {
@@ -125,12 +145,19 @@ for (const location of ["home", "drive-root"]) {
     f.handlers.get("session_start")({ reason: "startup" }, ctx);
     const record = f.extension.current;
     assert.ok(record);
+    assert.equal(process.cwd(), record.workspace);
     assert.equal(inside(f.root, record.workspace), true);
     await f.tools.get("write").execute("auto-write", { path: "auto.txt", content: "temporary" }, undefined, undefined, ctx);
     assert.equal(fs.readFileSync(path.join(record.workspace, "auto.txt"), "utf8"), "temporary");
     const event = { systemPromptOptions: { cwd, sections: {} } };
     f.handlers.get("before_agent_start")(event, ctx);
     assert.equal(event.systemPromptOptions.cwd, record.workspace);
+    await new Promise(setImmediate);
+    assert.equal(f.titles.at(-1), "π - Pi-Work");
+    ctx.sessionManager.getSessionName = () => "Demo";
+    f.handlers.get("session_info_changed")({}, ctx);
+    await new Promise(setImmediate);
+    assert.equal(f.titles.at(-1), "π - Demo - Pi-Work");
   });
 }
 

@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { inside, WorkspaceManager } from "../manager.mjs";
 
-for (const mode of ["standalone", "package", "home", "drive-root", "project"]) {
+for (const mode of ["standalone", "package", "home", "relative-config", "drive-root", ...(process.platform === "win32" ? ["system-directory"] : []), "project"]) {
 test(`installed Pi loads the ${mode} package and handles actual RPC new/resume transitions`, { timeout: 25000 }, async () => {
   const suite = path.dirname(fileURLToPath(import.meta.url));
   const testRoot = path.join(suite, ".runs");
@@ -17,7 +17,7 @@ test(`installed Pi loads the ${mode} package and handles actual RPC new/resume t
   const root = path.join(base, "Pi-Work");
   const project = path.join(base, "project");
   fs.mkdirSync(project);
-  const launchCwd = mode === "home" ? os.homedir() : mode === "drive-root" ? path.parse(suite).root : mode === "project" ? project : root;
+  const launchCwd = ["home", "relative-config"].includes(mode) ? os.homedir() : mode === "drive-root" ? path.parse(suite).root : mode === "system-directory" ? path.join(process.env.SystemRoot || process.env.WINDIR, "System32") : mode === "project" ? project : root;
   if (launchCwd === root) fs.mkdirSync(root, { recursive: true });
   const sdkEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
   const packageDir = path.dirname(path.dirname(sdkEntry));
@@ -25,6 +25,10 @@ test(`installed Pi loads the ${mode} package and handles actual RPC new/resume t
   const bin = typeof packageInfo.bin === "string" ? packageInfo.bin : packageInfo.bin.pi;
   const launcher = path.resolve(packageDir, bin);
   const extraArgs = [];
+  const probeFile = path.join(base, "cwd-probe.json");
+  const probeExtension = path.join(base, "probe.mjs");
+  fs.writeFileSync(probeExtension, `import fs from "node:fs"; export default function(pi) { pi.registerCommand("workspace-probe", { description: "Test-only cwd probe", handler: async (_args, ctx) => { fs.writeFileSync(${JSON.stringify(probeFile)}, JSON.stringify({ processCwd: process.cwd(), startupCwd: ctx.cwd, sessionCwd: ctx.sessionManager.getCwd(), agentDirEnvironment: process.env.PI_CODING_AGENT_DIR })); } }); }`);
+  extraArgs.push("-e", probeExtension);
   if (mode === "standalone") {
     const extensionDir = path.join(agentDir, "extensions", "pi-temp-workspaces");
     fs.mkdirSync(extensionDir, { recursive: true });
@@ -36,7 +40,7 @@ test(`installed Pi loads the ${mode} package and handles actual RPC new/resume t
   }
   const child = spawn(process.execPath, [launcher, "--mode", "rpc", "--offline", ...extraArgs], {
     cwd: launchCwd, windowsHide: true,
-    env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_TEMP_WORK_ROOT: root, PI_TEMP_WORK_BACKGROUND: "0" },
+    env: { ...process.env, PI_CODING_AGENT_DIR: mode === "relative-config" ? path.relative(launchCwd, agentDir) : agentDir, PI_TEMP_WORK_ROOT: root, PI_TEMP_WORK_BACKGROUND: "0" },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let buffer = "";
@@ -69,8 +73,16 @@ test(`installed Pi loads the ${mode} package and handles actual RPC new/resume t
     const commands = await request("get_commands");
     assert.equal(commands.success, true, JSON.stringify(commands));
     assert.match(JSON.stringify(commands), /temp-work/);
+    const probe = async () => {
+      const response = await request("prompt", { message: "/workspace-probe" });
+      assert.equal(response.success, true, JSON.stringify(response));
+      return JSON.parse(fs.readFileSync(probeFile, "utf8"));
+    };
     if (mode === "project") {
-      assert.equal(fs.existsSync(root), false, "Project startup must not activate a temporary workspace.");
+      assert.equal(fs.existsSync(root), true, "Plugin load must prepare Pi-Work even without activating a temporary session.");
+      assert.equal((await probe()).processCwd, launchCwd);
+      const records = new WorkspaceManager({ agentDir, root }).records;
+      assert.equal(fs.readdirSync(records).filter(name => name.endsWith(".json")).length, 0);
       return;
     }
     assert.doesNotMatch(JSON.stringify(commands), /model-system|"goal"/);
@@ -78,15 +90,20 @@ test(`installed Pi loads the ${mode} package and handles actual RPC new/resume t
     const list = () => fs.readdirSync(records).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(fs.readFileSync(path.join(records, name), "utf8")));
     assert.equal(list().length, 1, stderr);
     const first = list()[0];
+    assert.equal((await probe()).processCwd, first.workspace, "The actual Pi process must run in its conversation workspace.");
+    if (mode === "relative-config") assert.equal((await probe()).agentDirEnvironment, agentDir);
     fs.mkdirSync(path.dirname(first.sessionFile), { recursive: true });
     fs.writeFileSync(first.sessionFile, JSON.stringify({ type: "session", version: 3, id: first.sessionId, timestamp: new Date().toISOString(), cwd: launchCwd }) + "\n");
     fs.writeFileSync(path.join(first.workspace, "keep.txt"), "first conversation");
     const created = await request("new_session");
     assert.equal(created.success, true, JSON.stringify(created));
     assert.equal(list().length, 2, stderr);
+    const second = list().find(item => item.key !== first.key);
+    assert.equal((await probe()).processCwd, second.workspace);
     const switched = await request("switch_session", { sessionPath: first.sessionFile });
     assert.equal(switched.success, true, JSON.stringify(switched));
     assert.equal(list().length, 2);
+    assert.equal((await probe()).processCwd, first.workspace);
     assert.equal(fs.readFileSync(path.join(first.workspace, "keep.txt"), "utf8"), "first conversation");
     assert.doesNotMatch(stderr, /failed to load|extension error/i);
   } finally {

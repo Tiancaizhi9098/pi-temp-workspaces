@@ -4,13 +4,16 @@
 
 ## 使用
 
-安装后重开 Pi 或执行 `/reload`。从用户主目录（如 `C:\Users\你的用户名`）、盘符根目录（如 `C:\`）或临时父目录启动时，扩展会自动创建 `%TEMP%\Pi-Work`，并为当前会话分配 `session-<标识>` 子目录。无需手动建目录，也无需安装 PowerShell 启动脚本。在项目目录启动时，保留项目的原有工作目录。
+安装时会自动准备 `%TEMP%\Pi-Work` 父目录。重开 Pi 或执行 `/reload` 时，插件会再次确保它存在，即使当前是普通项目目录也会准备父目录。禁用了 npm 安装脚本的环境仍会在首次加载插件时创建。
+
+从用户主目录（如 `C:\Users\你的用户名`）、盘符根目录（如 `C:\`）、Windows 系统目录（如管理员终端常用的 `C:\Windows\System32`）或临时父目录启动时，扩展会为当前会话分配 `session-<标识>` 子目录，并将 **Pi 进程本身的当前目录**切换到该子目录。无需手动建目录或安装 PowerShell 启动脚本。在其他目录启动时，保留项目的原有工作目录，只准备临时父目录，不分配临时会话。
 
 - 新启动的对话及 `/new`：各自获得独立目录。
 - `/resume`、`pi -c`：同一对话继续使用原目录。
 - `/fork` 和 `/clone`：新会话使用新目录，不复制旧目录中的文件。
 - `/temp-work`：查看当前对话的完整目录。
 - 底部不显示临时目录状态行。
+- 临时模式的终端标题显示 `Pi-Work`；`/temp-work` 同时显示会话目录和进程实际当前目录。
 - `/temp-work cleanup`：立即执行一次清理检查。删除确认等待时间及使用中的目录保护仍然生效。
 - `/temp-work status`：查看后台清理是否运行、PID 及状态/日志目录；不带参数也会显示。
 - `/temp-work stop` / `/temp-work start`：手动停止或启动清理进程。停止只影响清理，下一次启动临时对话会再次启动。
@@ -59,7 +62,7 @@ pi install .
 
 新开 Pi 或执行 `/reload`。曾经手动放置过 `~/.pi/agent/extensions/pi-temp-workspaces/` 的用户，应先退出 Pi、按下文停止旧清理进程并将旧扩展移出 `extensions`，再安装本仓库版本，避免重复加载。
 
-已通过 GitHub 安装的用户可执行 `pi update --extensions` 后 `/reload`。`Pi-Work` 会在第一次符合条件的 Pi 启动或重载时创建；`pi install` 命令本身只登记和下载插件，不启动会话。项目目录中不会自动切换到临时模式。
+已通过 GitHub 安装的用户可执行 `pi update --extensions` 后 `/reload`。安装流程中的脚本只准备父目录，不启动会话或修改 shell profile；首次加载时还会重新校验并创建父目录。项目目录中不会自动切换到临时模式。
 
 ### 可选：让 PowerShell 7 的 Pi 列表和页脚也归到 Pi-Work
 
@@ -116,4 +119,4 @@ node ./janitor.mjs --agent-dir $piAgentDir --status
 node --test test/*.test.mjs
 ```
 
-先在仓库根目录执行 `npm ci --ignore-scripts`。测试覆盖用户主目录/盘符根目录自动创建、项目目录保持、独立目录、新建/恢复、Pi 自动加载及实际 RPC 切换、真实文件/PowerShell 工具、后台清理和停止、Magpie 式会话移走、在用保护、损坏标记、外部路径、目录链接、占用失败重试、系统清空临时目录、自定义根目录及 PowerShell 安装/卸载。PowerShell 测试在 Windows 上运行；Linux 运行其余测试，macOS 尚未验证。
+先在仓库根目录执行 `npm ci --ignore-scripts`，再执行 `npm test` 可包含真实 npm 安装生命周期测试。测试覆盖无历史配置的安装、用户主目录/盘符根目录/Windows 系统目录自动启用、项目目录保持、真实进程目录、新建/恢复、Pi 自动加载及实际 RPC 切换、真实文件/PowerShell 工具、后台清理和停止、Magpie 式会话移走、在用保护、损坏标记、外部路径、目录链接、占用失败重试、系统清空临时目录、自定义根目录及 PowerShell 安装/卸载。PowerShell 和系统目录测试在 Windows 上运行；Linux 运行其余测试，macOS 尚未验证。
