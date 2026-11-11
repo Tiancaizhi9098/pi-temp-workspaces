@@ -186,7 +186,7 @@ export function registerTempWorkspaces(pi, sdk, options = {}) {
       const background = status.running === true ? `运行中（PID ${status.pid}）` : status.running === false ? "未运行" : "状态异常，请检查清理日志";
       const message = current
         ? `当前临时对话目录：\n${current.workspace}\n\n/new 新建独立目录；/resume 恢复原目录。删除会话后约 10–15 秒自动清理，正在使用的目录会等到退出或切换后再清理。`
-        : `当前为普通项目对话。临时模式仅在 ${manager.root} 中启用。`;
+        : `当前为普通项目对话。从用户主目录、盘符根目录或 ${manager.root} 启动 Pi 时，会自动创建并使用临时工作目录。`;
       ctx.ui.notify(`${message}\n\n后台清理：${background}\n状态与日志：${manager.state}`, "info");
     },
   });

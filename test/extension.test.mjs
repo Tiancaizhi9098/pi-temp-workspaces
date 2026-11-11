@@ -17,6 +17,7 @@ function environment(t, { project = false } = {}) {
   const base = fs.mkdtempSync(path.join(testRoot, "integration-"));
   const agentDir = path.join(base, "agent");
   const root = path.join(base, "Pi-Work");
+  const home = path.join(base, "user-home");
   const handlers = new Map();
   const tools = new Map();
   const commands = new Map();
@@ -29,7 +30,7 @@ function environment(t, { project = false } = {}) {
     setActiveTools: (names) => { active = names; },
     getSettings: () => ({}),
   };
-  const extension = registerTempWorkspaces(pi, { ...sdk, getAgentDir: () => agentDir }, { root, background: false });
+  const extension = registerTempWorkspaces(pi, { ...sdk, getAgentDir: () => agentDir }, { root, home, background: false });
   const context = (identity) => ({
     cwd: project ? path.join(base, "real-project") : root,
     sessionManager: {
@@ -44,7 +45,7 @@ function environment(t, { project = false } = {}) {
     assert.ok(inside(testRoot, base) && base !== testRoot);
     fs.rmSync(base, { recursive: true, force: true });
   });
-  return { base, root, agentDir, handlers, tools, commands, extension, context, session, active: () => active };
+  return { base, root, home, agentDir, handlers, tools, commands, extension, context, session, active: () => active };
 }
 
 test("real Pi file tools use the per-conversation cwd and reject external writes", async (t) => {
@@ -114,6 +115,24 @@ test("ordinary project sessions receive no tool overrides or scratch folders", (
   assert.equal(f.tools.size, 0);
   assert.equal(fs.existsSync(f.root), false);
 });
+
+for (const location of ["home", "drive-root"]) {
+  test(`starting in ${location} creates Pi-Work without a PowerShell profile helper`, async (t) => {
+    const f = environment(t);
+    const cwd = location === "home" ? f.home : path.parse(f.base).root;
+    const ctx = { ...f.context(f.session()), cwd };
+    assert.equal(fs.existsSync(f.root), false);
+    f.handlers.get("session_start")({ reason: "startup" }, ctx);
+    const record = f.extension.current;
+    assert.ok(record);
+    assert.equal(inside(f.root, record.workspace), true);
+    await f.tools.get("write").execute("auto-write", { path: "auto.txt", content: "temporary" }, undefined, undefined, ctx);
+    assert.equal(fs.readFileSync(path.join(record.workspace, "auto.txt"), "utf8"), "temporary");
+    const event = { systemPromptOptions: { cwd, sections: {} } };
+    f.handlers.get("before_agent_start")(event, ctx);
+    assert.equal(event.systemPromptOptions.cwd, record.workspace);
+  });
+}
 
 test("switching from a temporary session to a project restores ordinary file tools", async (t) => {
   const f = environment(t);

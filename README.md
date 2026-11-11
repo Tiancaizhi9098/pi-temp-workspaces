@@ -4,7 +4,7 @@
 
 ## 使用
 
-在 `%TEMP%\Pi-Work` 中启动 Pi，扩展会自动为当前会话分配 `session-<标识>` 子目录。可选的 PowerShell 7 启动器能在盘符根目录或用户主目录运行 `pi` 时自动进入这个父目录，在项目目录启动时保持当前目录。
+安装后重开 Pi 或执行 `/reload`。从用户主目录（如 `C:\Users\你的用户名`）、盘符根目录（如 `C:\`）或临时父目录启动时，扩展会自动创建 `%TEMP%\Pi-Work`，并为当前会话分配 `session-<标识>` 子目录。无需手动建目录，也无需安装 PowerShell 启动脚本。在项目目录启动时，保留项目的原有工作目录。
 
 - 新启动的对话及 `/new`：各自获得独立目录。
 - `/resume`、`pi -c`：同一对话继续使用原目录。
@@ -16,7 +16,7 @@
 - `/temp-work stop` / `/temp-work start`：手动停止或启动清理进程。停止只影响清理，下一次启动临时对话会再次启动。
 - 项目目录中的普通对话：保持 Pi 原有工具和目录行为。
 
-Pi 的会话记录仍存放在其原来的全局会话库中，临时对话在列表中仍归到 `Pi-Work`。模型看到的有效目录、文件工具和命令的默认目录是每个对话自己的子目录；可以用 `/temp-work` 查看。
+Pi 的会话记录仍存放在其原来的全局会话库中，会话列表及原生页脚按实际启动目录归类和显示。模型看到的有效目录、文件工具和命令的默认目录是每个对话自己的子目录；可以用 `/temp-work` 查看。可选的 PowerShell 启动器能让从用户主目录或盘符根目录启动的 Pi 在列表和原生页脚中也显示为 `Pi-Work`。
 
 ## 文件落点
 
@@ -59,7 +59,11 @@ pi install .
 
 新开 Pi 或执行 `/reload`。曾经手动放置过 `~/.pi/agent/extensions/pi-temp-workspaces/` 的用户，应先退出 Pi、按下文停止旧清理进程并将旧扩展移出 `extensions`，再安装本仓库版本，避免重复加载。
 
-### 可选：配置 PowerShell 7 的 pi 启动目录
+已通过 GitHub 安装的用户可执行 `pi update --extensions` 后 `/reload`。`Pi-Work` 会在第一次符合条件的 Pi 启动或重载时创建；`pi install` 命令本身只登记和下载插件，不启动会话。项目目录中不会自动切换到临时模式。
+
+### 可选：让 PowerShell 7 的 Pi 列表和页脚也归到 Pi-Work
+
+插件自身已经会自动创建并使用临时目录。只有希望 Pi 的原生启动目录、会话列表归属也改为 `Pi-Work` 时，才需要此脚本；仅安装插件即可使用上述目录管理功能。
 
 在仓库根目录运行：
 
@@ -112,4 +116,4 @@ node ./janitor.mjs --agent-dir $piAgentDir --status
 node --test test/*.test.mjs
 ```
 
-先在仓库根目录执行 `npm ci --ignore-scripts`。测试覆盖独立目录、新建/恢复、Pi 自动加载及实际 RPC 切换、真实文件/PowerShell 工具、后台清理和停止、Magpie 式会话移走、在用保护、损坏标记、外部路径、目录链接、占用失败重试、系统清空临时目录、自定义根目录及 PowerShell 安装/卸载。PowerShell 测试在 Windows 上运行；Linux 运行其余测试，macOS 尚未验证。
+先在仓库根目录执行 `npm ci --ignore-scripts`。测试覆盖用户主目录/盘符根目录自动创建、项目目录保持、独立目录、新建/恢复、Pi 自动加载及实际 RPC 切换、真实文件/PowerShell 工具、后台清理和停止、Magpie 式会话移走、在用保护、损坏标记、外部路径、目录链接、占用失败重试、系统清空临时目录、自定义根目录及 PowerShell 安装/卸载。PowerShell 测试在 Windows 上运行；Linux 运行其余测试，macOS 尚未验证。

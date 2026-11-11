@@ -63,9 +63,10 @@ function alive(pid) {
 }
 
 export class WorkspaceManager {
-  constructor({ agentDir, root = process.env.PI_TEMP_WORK_ROOT || path.join(os.tmpdir(), "Pi-Work"), graceMs = 10000, now = () => Date.now() }) {
+  constructor({ agentDir, root = process.env.PI_TEMP_WORK_ROOT || path.join(os.tmpdir(), "Pi-Work"), home = os.homedir(), graceMs = 10000, now = () => Date.now() }) {
     this.agentDir = canonicalPath(agentDir);
     this.root = canonicalPath(root);
+    this.home = canonicalPath(home);
     const stateBase = path.join(this.agentDir, "state", "pi-temp-workspaces");
     // Preserve the original default-root registry, while custom roots cannot
     // share records or a background lock with a different scratch location.
@@ -89,7 +90,11 @@ export class WorkspaceManager {
     return this;
   }
 
-  eligible(cwd) { return samePath(cwd, this.root); }
+  eligible(cwd) {
+    const current = canonicalPath(cwd);
+    return samePath(current, this.root) || samePath(current, this.home)
+      || samePath(current, path.parse(current).root);
+  }
 
   keyFor(sessionId, sessionFile) {
     const file = sessionFile ? canonicalPath(sessionFile) : `ephemeral:${sessionId}`;
