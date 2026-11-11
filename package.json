@@ -1,6 +1,6 @@
 {
   "name": "pi-temp-workspaces",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Per-conversation local scratch folders with cleanup when a Pi session is deleted.",
   "type": "module",
   "license": "MIT",

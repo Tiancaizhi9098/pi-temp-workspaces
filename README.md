@@ -19,7 +19,7 @@
 - `/temp-work stop` / `/temp-work start`：手动停止或启动清理进程。停止只影响清理，下一次启动临时对话会再次启动。
 - 项目目录中的普通对话：保持 Pi 原有工具和目录行为。
 
-Pi 的会话记录仍存放在其原来的全局会话库中，会话列表及原生页脚按实际启动目录归类和显示。模型看到的有效目录、文件工具和命令的默认目录是每个对话自己的子目录；可以用 `/temp-work` 查看。可选的 PowerShell 启动器能让从用户主目录或盘符根目录启动的 Pi 在列表和原生页脚中也显示为 `Pi-Work`。
+Pi 的会话记录仍存放在其原来的全局会话库中，会话列表及原生页脚按实际启动目录归类和显示。模型看到的有效目录、文件工具和命令的默认目录是每个对话自己的子目录；可以用 `/temp-work` 查看。Windows 个人 GitHub 安装会配置 PowerShell 7 启动函数。在主目录、盘符根目录或系统目录直接输入 `pi`，Pi 在启动前就进入 `Pi-Work`，会话列表和原生页脚也归到该目录。
 
 ## 文件落点
 
@@ -46,11 +46,15 @@ Shell、MCP 和其他扩展仍保留本机权限。外部工具的专用缓存�
 
 ## 安装和停止
 
-独立安装本插件：
+Windows PowerShell 7 中运行这行命令，安装插件并立即在当前窗口启用 `pi` 启动函数。
 
-```text
-pi install git:github.com/Tiancaizhi9098/pi-temp-workspaces
+```powershell
+pi install git:github.com/Tiancaizhi9098/pi-temp-workspaces && . $PROFILE.CurrentUserAllHosts
 ```
+
+之后直接输入 `pi`。新开的 PowerShell 7 窗口会自动加载该函数。若安装环境禁用了 npm 安装脚本，首次加载 Pi 扩展时会补配 profile，随后请新开 PowerShell 7 窗口。
+
+其他 shell 可用 `pi install git:github.com/Tiancaizhi9098/pi-temp-workspaces` 安装插件。
 
 或克隆仓库后安装：
 
@@ -62,37 +66,14 @@ pi install .
 
 新开 Pi 或执行 `/reload`。曾经手动放置过 `~/.pi/agent/extensions/pi-temp-workspaces/` 的用户，应先退出 Pi、按下文停止旧清理进程并将旧扩展移出 `extensions`，再安装本仓库版本，避免重复加载。
 
-已通过 GitHub 安装的用户可执行 `pi update --extensions` 后 `/reload`。安装流程中的脚本只准备父目录，不启动会话或修改 shell profile；首次加载时还会重新校验并创建父目录。项目目录中不会自动切换到临时模式。
+更新时可再次执行上面的安装命令。Windows 个人 GitHub 安装会备份 PowerShell 7 的当前用户通用 profile，并在标记块中引用 Pi 配置目录下的 `shell/pi-temp-workspaces-start.ps1`。如需指定其他 profile 路径，可在安装前设置 `PI_TEMP_WORK_PROFILE`，并在当前窗口加载该文件。
 
-### 可选：让 PowerShell 7 的 Pi 列表和页脚也归到 Pi-Work
+项目内安装、源码开发和其他平台使用扩展内的临时目录功能。若从本地源码安装，也可以在插件目录手动执行 `pwsh -File ./scripts/install-powershell7.ps1` 配置 PowerShell 7。
 
-插件自身已经会自动创建并使用临时目录。只有希望 Pi 的原生启动目录、会话列表归属也改为 `Pi-Work` 时，才需要此脚本；仅安装插件即可使用上述目录管理功能。
-
-在仓库根目录运行：
-
-```powershell
-pwsh -File ./scripts/install-powershell7.ps1
-```
-
-脚本查找当前 Pi 启动程序，在用户的 Pi 配置目录中保存一个启动函数，并将它加入当前用户的 PowerShell 7 通用 profile。它只替换自己标记的配置块，保留其他配置并备份被修改的现有文件。新开 PowerShell 7 后生效，已有窗口可执行 `. $PROFILE.CurrentUserAllHosts`。
-
-若同名 `shell/pi-start.ps1` 已存在且不是此安装器生成的，脚本会停止并提示先将原文件移开，避免覆盖自定义启动器。安装器支持 `-ProfilePath`、`-AgentDir`、`-LauncherPath` 参数。
-
-移除启动目录配置：
+移除启动配置时，在插件目录执行以下命令。若直接用 `pi remove` 移除 GitHub 插件，profile 中的存在性检查会自动停用启动函数。
 
 ```powershell
 pwsh -File ./scripts/install-powershell7.ps1 -Uninstall
-```
-
-此操作移除 profile 中的启动块，保留其他配置、后续添加的内容、备份和不再引用的启动器文件；新开的 PowerShell 7 窗口恢复直接调用原 Pi 命令。
-
-手动进入临时模式也可以：
-
-```powershell
-$piScratchRoot = Join-Path $env:TEMP 'Pi-Work'
-New-Item -ItemType Directory -Path $piScratchRoot -Force | Out-Null
-Set-Location -LiteralPath $piScratchRoot
-pi
 ```
 
 状态位于 `~/.pi/agent/state/pi-temp-workspaces/`。那里只保存目录归属、使用标记、进程信息和有大小上限的清理日志，不复制聊天内容。

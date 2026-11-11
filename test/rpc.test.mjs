@@ -32,6 +32,7 @@ test(`installed Pi loads the ${mode} package and handles actual RPC new/resume t
   if (mode === "standalone") {
     const extensionDir = path.join(agentDir, "extensions", "pi-temp-workspaces");
     fs.mkdirSync(extensionDir, { recursive: true });
+    fs.cpSync(fileURLToPath(new URL("../scripts", import.meta.url)), path.join(extensionDir, "scripts"), { recursive: true });
     for (const file of ["index.js", "extension.mjs", "manager.mjs", "janitor.mjs", "package.json"]) {
       fs.copyFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), path.join(extensionDir, file));
     }
